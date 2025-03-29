@@ -1,0 +1,353 @@
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: ray_transnet
+spec:
+  # submissionMode specifies how RayJob submits the Ray job to the RayCluster.
+  # The default value is "K8sJobMode", meaning RayJob will submit the Ray job via a submitter Kubernetes Job.
+  # The alternative value is "HTTPMode", indicating that KubeRay will submit the Ray job by sending an HTTP request to the RayCluster.
+  # submissionMode: "K8sJobMode"
+  entrypoint: python /home/ray/transnet/ray_pipeline.py
+  # shutdownAfterJobFinishes specifies whether the RayCluster should be deleted after the RayJob finishes. Default is false.
+  # shutdownAfterJobFinishes: false
+
+  # ttlSecondsAfterFinished specifies the number of seconds after which the RayCluster will be deleted after the RayJob finishes.
+  # ttlSecondsAfterFinished: 10
+
+  # activeDeadlineSeconds is the duration in seconds that the RayJob may be active before
+  # KubeRay actively tries to terminate the RayJob; value must be positive integer.
+  # activeDeadlineSeconds: 120
+
+  # RuntimeEnvYAML represents the runtime environment configuration provided as a multi-line YAML string.
+  # See https://docs.ray.io/en/latest/ray-core/handling-dependencies.html for details.
+  # (New in KubeRay version 1.0.)
+  runtimeEnvYAML: |
+    pip:
+      - requests
+      - psycopg2-binary
+      - oci
+      - pandas
+      - numpy
+      - json
+      - pyarrow
+
+    env_vars:
+      counter_name: "test_counter"
+    working_dir: "https://github.com/krishnawin/TransNetV2/archive/refs/heads/master.zip"
+    
+
+  # Suspend specifies whether the RayJob controller should create a RayCluster instance.
+  # If a job is applied with the suspend field set to true, the RayCluster will not be created and we will wait for the transition to false.
+  # If the RayCluster is already created, it will be deleted. In the case of transition to false, a new RayCluster will be created.
+  # suspend: false
+
+  # rayClusterSpec specifies the RayCluster instance to be created by the RayJob controller.
+  rayClusterSpec:
+    rayVersion: '2.41.0' # should match the Ray version in the image of the containers
+    # Ray head pod template
+    headGroupSpec:
+      # The `rayStartParams` are used to configure the `ray start` command.
+      # See https://github.com/ray-project/kuberay/blob/master/docs/guidance/rayStartParams.md for the default settings of `rayStartParams` in KubeRay.
+      # See https://docs.ray.io/en/latest/cluster/cli.html#ray-start for all available options in `rayStartParams`.
+      rayStartParams: {}
+      #pod template
+      template:
+        spec:
+          containers:
+            - name: ray-head
+              image: krishnamoorthya/ray-ffmpeg
+              ports:
+                - containerPort: 6379
+                  name: gcs-server
+                - containerPort: 8265 # Ray dashboard
+                  name: dashboard
+                - containerPort: 10001
+                  name: client
+              resources:
+                limits:
+                  cpu: "1"
+                requests:
+                  cpu: "200m"
+              volumeMounts:
+                - mountPath: /home/ray/yt
+                  name: yt
+                - mountPath: /etc/oci/
+                  name: yt-config
+                - mountPath: /etc/proxy/
+                  name: smartproxy
+              env:
+                - name: PG_DBNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: fitcntr
+                      key: PG_DBNAME
+                - name: PG_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: fitcntr
+                      key: PG_USER
+                - name: PG_PASS
+                  valueFrom:
+                    secretKeyRef:
+                      name: fitcntr
+                      key: PG_PASS
+                - name: PG_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: fitcntr
+                      key: PG_HOST
+                - name: PG_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: fitcntr
+                      key: PG_PORT
+          volumes:
+            # You set volumes at the Pod level, then mount them into containers inside that Pod
+            - name: yt
+              configMap:
+                # Provide the name of the ConfigMap you want to mount.
+                name: yt-download-code
+                # An array of keys from the ConfigMap to create as files
+                items:
+                  - key: yt-download-code.py
+                    path: yt-download-code.py
+            - name: yt-config
+              secret:
+                  secretName: oci-config
+            - name: smartproxy
+              secret:
+                  secretName: smartproxy
+    workerGroupSpecs:
+      # the pod replicas in this group typed worker
+      - replicas: 1
+        minReplicas: 1
+        maxReplicas: 5
+        # logical group name, for this called small-group, also can be functional
+        groupName: small-group
+        # The `rayStartParams` are used to configure the `ray start` command.
+        # See https://github.com/ray-project/kuberay/blob/master/docs/guidance/rayStartParams.md for the default settings of `rayStartParams` in KubeRay.
+        # See https://docs.ray.io/en/latest/cluster/cli.html#ray-start for all available options in `rayStartParams`.
+        rayStartParams: {}
+        #pod template
+        template:
+          spec:
+            containers:
+              - name: ray-worker # must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc'
+                image: krishnamoorthya/ray-ffmpeg
+                resources:
+                  limits:
+                    cpu: "1"
+                  requests:
+                    cpu: "200m"
+                volumeMounts:
+                  - mountPath: /home/ray/yt
+                    name: yt
+                  - mountPath: /etc/oci
+                    name: yt-config
+                  - mountPath: /etc/proxy
+                    name: smartproxy
+                env:
+                  - name: PG_DBNAME
+                    valueFrom:
+                      secretKeyRef:
+                        name: fitcntr
+                        key: PG_DBNAME
+                  - name: PG_USER
+                    valueFrom:
+                      secretKeyRef:
+                        name: fitcntr
+                        key: PG_USER
+                  - name: PG_PASS
+                    valueFrom:
+                      secretKeyRef:
+                        name: fitcntr
+                        key: PG_PASS
+                  - name: PG_HOST
+                    valueFrom:
+                      secretKeyRef:
+                        name: fitcntr
+                        key: PG_HOST
+                  - name: PG_PORT
+                    valueFrom:
+                      secretKeyRef:
+                        name: fitcntr
+                        key: PG_PORT
+                  - name: access_key
+                    valueFrom:
+                      sec
+            volumes:
+              # You set volumes at the Pod level, then mount them into containers inside that Pod
+              - name: yt
+                configMap:
+                  # Provide the name of the ConfigMap you want to mount.
+                  name: yt-download-code
+                  # An array of keys from the ConfigMap to create as files
+                  items:
+                    - key: yt-download-code.py
+                      path: yt-download-code.py
+              - name: yt-config
+                secret:
+                      secretName: oci-config
+              - name: smartproxy
+                secret:
+                    secretName: smartproxy
+  # SubmitterPodTemplate is the template for the pod that will run the `ray job submit` command against the RayCluster.
+  # If SubmitterPodTemplate is specified, the first container is assumed to be the submitter container.
+  # submitterPodTemplate:
+  #   spec:
+  #     restartPolicy: Never
+  #     containers:
+  #       - name: my-custom-rayjob-submitter-pod
+  #         image: rayproject/ray:2.41.0
+  #         # If Command is not specified, the correct command will be supplied at runtime using the RayJob spec `entrypoint` field.
+  #         # Specifying Command is not recommended.
+  #         # command: ["sh", "-c", "ray job submit --address=http://$RAY_DASHBOARD_ADDRESS --submission-id=$RAY_JOB_SUBMISSION_ID -- echo hello world"]
+
+
+######################Ray code sample#################################
+# this sample is from https://docs.ray.io/en/latest/cluster/job-submission.html#quick-start-example
+# it is mounted into the container and executed to show the Ray job at work
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yt-download-code
+data:
+  yt-download-code.py: |
+          import yt_dlp
+          import os
+          import json
+          import psycopg2
+          import ray
+          import oci
+
+          ray.init()
+
+          db_params = {
+              'dbname': os.getenv('PG_DBNAME'),
+              'user': os.getenv('PG_USER'),
+              'password': os.getenv('PG_PASS'),
+              'host': os.getenv('PG_HOST'),
+              'port': os.getenv('PG_PORT')
+            }
+          @ray.remote
+          class YouTubeVTTDownloader:
+              def __init__(self, db_params):
+                  self.db_params = db_params
+                  self.proxy_ip_list = []
+
+              def dbconnection(self):
+                  conn = psycopg2.connect(**self.db_params)
+                  return conn
+
+              def quiet_progress_hook(self, d):
+                  if d['status'] == 'finished':
+                      print(f" -> {d['filename']}")
+
+              def get_proxy_lists(self):
+                  proxies = []
+                  with open('/etc/proxy/smartproxy.csv') as f:
+                      proxies = f.readlines()
+                  proxies = [x.strip() for x in proxies]
+                  print(len(proxies))
+                  return proxies
+
+              def getproxy(self):
+                  try:
+                      if len(self.proxy_ip_list) == 0:
+                          self.proxy_ip_list = self.get_proxy_lists()
+                      return self.proxy_ip_list.pop(0)
+                  except Exception as e:
+                      print(f"Failed to get proxy ip: {e}")
+
+              def get_video(self, tmp_dir, video_url, language,videoid):
+                  try:
+                      proxy = self.getproxy()
+                      print(proxy)
+                      if "Failed to get proxy ip: There are no working proxies at this time." in proxy:
+                          return
+
+                      ydl_opts = {
+                          'format_sort': ['+height', '+filesize'],
+                          'outtmpl': f'{tmp_dir}/%(id)s',
+                          'writeinfojson': True,
+                          'writeautomaticsub': True,
+                          'subtitlesformat': 'vtt',
+                          'skip_download': False,
+                          'subtitleslangs': [language, '-live_chat'],
+                          'quiet': True,
+                          'progress_hooks': [self.quiet_progress_hook],
+                          'proxy': proxy,
+                      }
+
+                      with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                          ydl.download([video_url])
+                      self.updatevideos(videoid, 3)
+                      self.push_to_oci(videoid)
+                  except Exception as e:
+                      print(f"Failed to get: {video_url}\n{e}")
+                      self.updatevideos(videoid, -2)
+
+              def getvideos(self):
+                  connection = self.dbconnection()
+                  cursor = connection.cursor()
+                  cursor.execute("""SELECT "VIDEOID" from yt."YT_VIDEOS_1M"  LIMIT 100""")
+                  videos = cursor.fetchall()
+                  cursor.close()
+                  connection.close()
+                  return videos
+
+              def updatevideos(self, videoid, status):
+                  connection = self.dbconnection()
+                  #for video in videos:
+                  #    if os.path.exists('./Data/vtt/' + video[0]):
+                  cursor = connection.cursor()
+                  cursor.execute("""update yt."YT_VIDEOS" set "STATUS" = %s where "VIDEOID" = %s""", (status,videoid,))
+                  cursor.close()
+                      #elif os.path.exists('./Data/vtt/' + video[0] + '.info.json'):
+                      #    with open('./Data/vtt/' + video[0] + '.info.json') as f:
+                      #        jsondata = json.load(f)
+                      #        if len(jsondata['subtitles']) == 0 and len(jsondata['automatic_captions']) == 0:
+                      #            cursor = connection.cursor()
+                      #            cursor.execute("""update yt."YT_VIDEOS" set "STATUS" = 3 where "VIDEOID" = %s""", (video[0],))
+                      #            cursor.close()
+                  connection.commit()
+                  connection.close()
+
+              def process_vtt(self, videos):
+                  for video in videos:
+                      print(video[0])
+                      self.get_video(f'./Data/vtt/{video[0]}', f'https://www.youtube.com/watch?v={video[0]}', 'en',video[0])
+                  
+              
+              def push_to_oci(self,videoid):
+                  config = oci.config.from_file("/etc/oci/oci-config")
+                  object_storage = oci.object_storage.ObjectStorageClient(config)
+                  local_directory = f'./Data/vtt/{videoid}'
+                  oci_prefix = "vtt"
+                  namespace = object_storage.get_namespace().data
+                  bucket_name = "yt-vtt"
+                  for root, _, files in os.walk(local_directory):
+                      for filename in files:
+                          local_path = os.path.join(root, filename)
+                          object_name = os.path.join(oci_prefix, os.path.relpath(local_path, local_directory)).replace("\\", "/")
+                          try:
+                              with open(local_path, "rb") as f:
+                                  object_storage.put_object(namespace, bucket_name, object_name, f)
+                              print(f"Uploaded {local_path} to {bucket_name}/{object_name}")
+                          except Exception as e:
+                              print(f"Failed to upload {local_path}: {e}")
+
+          downloader = YouTubeVTTDownloader.remote(db_params)
+          rows = ray.get(downloader.getvideos.remote())
+          chunk_size = 10
+          refs = []
+          chunks = [rows[i: i + chunk_size] for i in range(0, len(rows), chunk_size)]
+          for chunk in chunks:
+              refs.append(downloader.process_vtt.remote(chunk))
+          #ray.get(downloader.updatevideos.remote(rows))
+          #ray.get(downloader.push_to_oci.remote())
+          ray.get(refs)
+          
+
+---
