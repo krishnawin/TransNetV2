@@ -1,0 +1,1 @@
+{"data": {"video": "s3://yt-vtt/vtt/Q-yRz_-mE9I.mkv"}, "annotations": [{"result": [{"type": "timelinelabels", "value": {"ranges": [{"start": 0, "end": 876}], "timelinelabels": ["Stability Ball Knee Tucks"]}, "to_name": "video", "from_name": "TimelineLabel"}]}]}
